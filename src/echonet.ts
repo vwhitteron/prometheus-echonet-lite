@@ -1,4 +1,5 @@
 import MetricsProvider from "./metrics";
+import { Buffer } from 'buffer';
 
 var EchonetLite = require('node-echonet-lite');
 const { getClassGroupName, getClassName } = require('node-echonet-lite/lib/core/core');
@@ -56,13 +57,14 @@ export default class ELProvider {
                 const class_code = eoj[1];
                 const groupName = this.echonet.getClassGroupName(group_code);
                 const className = this.echonet.getClassName(group_code, class_code);
-                if(group_code === 0x02 && class_code === 0x87) {
-                    console.log(`Discovered group: ${groupName}, class: ${className} at address ${address}`);
+                console.log(`Discovered group: ${groupName}, class: ${className} at address ${address} [${JSON.stringify(eoj)}]`);
+                // if(group_code === 0x02 && (class_code === 0x87 || class_code === 0x79)) {
+                    // console.log(`Discovered group: ${groupName}, class: ${className} at address ${address}`);
                     this.devices.push({
                         address: address,
                         eoj: eoj
                     })
-                }
+                // }
             }
         });
     }
@@ -77,7 +79,7 @@ export default class ELProvider {
             const class_name = this.echonet.getClassName(group_code, class_code);
 
             if(group_code === 0x02 && class_code === 0x87) {
-                console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
+                // console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
 
                 const total = await this.getTotalConsumption(device.address, device.eoj);
                 const metric:  EchonetPowerMetric = {
@@ -105,6 +107,42 @@ export default class ELProvider {
                     m.push(metric);
                 });
             }
+            
+            if(group_code === 0x02 && class_code === 0x79) {
+                // console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
+                let metric:  EchonetPowerMetric;
+
+                const generatedWatts = await this.getEnergyGeneratedWatts(device.address, device.eoj);
+                metric = {
+                    name: 'power_generated_watts',
+                    group: group_name,
+                    class: class_name,
+                    address: device.address,
+                    value: generatedWatts,
+                }
+                m.push(metric);
+
+                const generatedKwh = await this.getEnergyGeneratedKwh(device.address, device.eoj);
+                metric = {
+                    name: 'power_generated_kwh',
+                    group: group_name,
+                    class: class_name,
+                    address: device.address,
+                    value: generatedKwh,
+                }
+                m.push(metric);
+
+                const soldKwh = await this.getEnergySoldKwh(device.address, device.eoj);
+                metric = {
+                    name: 'power_sold_kwh',
+                    group: group_name,
+                    class: class_name,
+                    address: device.address,
+                    value: soldKwh,
+                }
+                m.push(metric);
+
+            }
         }
     
         return m;
@@ -126,6 +164,91 @@ export default class ELProvider {
                 resolve(res['message']['data']['list']);
             });
         });
+    }
+
+    getEnergyGeneratedWatts(address, eoj): Promise<number> {
+        return new Promise(resolve => {
+            const epc = 0xE0;
+            this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
+                if(err != null) {
+                    console.log(`Error: ${err}`);
+                    resolve(0);
+                }
+                // console.log(`    EnergyGeneratedWatts: ${JSON.stringify(res['message'])}`);
+                const prop_list = res['message']['prop'];
+                for(var i=0; i<prop_list.length; i++) {
+                    var prop = prop_list[i];
+                    if(prop['epc'] === epc) {
+                        const value = this.bufferToWatts(prop['buffer']);
+                        resolve(value);
+                    }
+                }
+                resolve(0);
+            });
+        });
+    }
+
+    getEnergyGeneratedKwh(address, eoj): Promise<number> {
+        return new Promise(resolve => {
+            const epc = 0xE1;
+            this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
+                if(err != null) {
+                    console.log(`Error: ${err}`);
+                    resolve(0);
+                }
+                // console.log(`    EnergyGeneratedKwh: ${JSON.stringify(res['message'])}`);
+                const prop_list = res['message']['prop'];
+                for(var i=0; i<prop_list.length; i++) {
+                    var prop = prop_list[i];
+                    if(prop['epc'] === epc) {
+                        const value = this.bufferToKwh(prop['buffer']);
+                        resolve(value);
+                    }
+                }
+                resolve(0);
+            });
+        });
+    }
+
+    getEnergySoldKwh(address, eoj): Promise<number> {
+        return new Promise(resolve => {
+            const epc = 0xE3;
+            this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
+                if(err != null) {
+                    console.log(`Error: ${err}`);
+                    resolve(0);
+                }
+                // console.log(`EnergySoldKwh: ${JSON.stringify(res['message'])}`);
+                const prop_list = res['message']['prop'];
+                for(var i=0; i<prop_list.length; i++) {
+                    var prop = prop_list[i];
+                    if(prop['epc'] === epc) {
+                        const value = this.bufferToKwh(prop['buffer']);
+                        resolve(value);
+                    }
+                }
+
+                resolve(0);
+            });
+        });
+    }
+
+    bufferToWatts(numAry): number {
+        if(numAry === null) {
+            return 0;
+        }
+        const buf = Buffer.from(numAry);
+        const value = buf.readUint16BE();
+        return value;
+    }
+
+    bufferToKwh(numAry): number {
+        if(numAry === null) {
+            return 0;
+        }
+        const buf = Buffer.from(numAry);
+        const value = buf.readUint32BE() / 1000;
+        return value;
     }
 
     stopDiscovery() {

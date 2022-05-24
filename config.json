@@ -1,0 +1,44 @@
+{
+    "server": {
+        "address": "0.0.0.0",
+        "port": "9095"
+    },
+    "meters": {
+        "10.255.1.61": {
+            "name": "smart-cosmo",
+            "circuits": {
+                "1": "Washing machine",
+                "2": "Network rack",
+                "3": "Wash room",
+                "4": "EV charger",
+                "5": "Study",
+                "6": "2F Bedroom east",
+                "7": "Oven",
+                "8": "EcoCute",
+                "9": "Induction cooktop",
+                "10": "2F Bedroom west",
+                "11": "1F Entry and toilet",
+                "12": "Bathroom",
+                "13": "Microwave",
+                "14": "1F Aircon",
+                "15": "2F Aircon",
+                "16": "Sub-panel",
+                "17": "Dishwasher",
+                "18": "Kitchen",
+                "19": "unused",
+                "20": "Dining room",
+                "21": "unused",
+                "22": "unused",
+                "23": "unused",
+                "24": "unused"
+            }
+        },
+        "10.255.1.62": {
+            "name": "solar-pdu",
+            "circuits": {
+                "1": "unused",
+                "2": "unused"
+            }
+        }
+    }
+}

@@ -1,13 +1,18 @@
 import express, { Express, Request, Response } from 'express';
-import dotenv from 'dotenv';
 import Metrics from './metrics';
 
-dotenv.config();
+const config = require('../config.json');
 
 const app: Express = express();
-const port: number = process.env.PORT != null
-                   ? parseInt(process.env.PORT, 10)
+
+const port: number = config.server.port != null
+                   ? parseInt(config.server.port, 10)
                    : 3000;
+
+const address: number = config.server.address != null
+                   ? config.server.address
+                   : "127.0.0.1";
+
 
 app.get('/metrics', async (req: Request, res: Response) => {
     try {
@@ -20,5 +25,5 @@ app.get('/metrics', async (req: Request, res: Response) => {
 });
 
 app.listen(port, () => {
-    console.log(`Server is running at https://0.0.0.0:${port}`);
+    console.log(`Server is running at https://${address}:${port}`);
 })
