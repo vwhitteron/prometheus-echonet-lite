@@ -247,7 +247,12 @@ export default class ELProvider {
                 for(const prop of res['message']['prop']) {
                     if(prop['epc'] === epc && prop['buffer'] !== null) {
                         const buf = Buffer.from(prop['buffer']);
-                        const value = buf.readUint16BE();                
+                        let value: number;
+                        if(buf.byteLength === 2) {
+                            value = buf.readUint16BE();               
+                        } else { 
+                            value = buf.readInt32BE();
+                        }
                         resolve(value);
                     }
                 }
