@@ -11,15 +11,33 @@ export default class MetricsProvider {
         const registry = new Registry()
 
         registry.registerMetric( new Gauge({
-            name:  'circuit_power_watts',
-            help: 'circuit power in watts',
+            name:  'power_total_in_kwh',
+            help: 'Cumulative total incoming power in kwh',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
+        registry.registerMetric( new Gauge({
+            name:  'power_total_out_kwh',
+            help: 'Cumulative total outgoing power in kwh',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
+        registry.registerMetric( new Gauge({
+            name:  'power_total_watts',
+            help: 'total power in watts',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
+        registry.registerMetric( new Gauge({
+            name:  'power_circuit_kwh',
+            help: 'cumulative circuit power in kwh',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'circuit_id', 'circuit_name'],
         }) );
 
         registry.registerMetric( new Gauge({
-            name:  'total_power_watts',
-            help: 'total power in watts',
-            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+            name:  'power_circuit_watts',
+            help: 'circuit power in watts',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'circuit_id', 'circuit_name'],
         }) );
 
         registry.registerMetric( new Gauge({
@@ -52,67 +70,44 @@ export default class MetricsProvider {
 
         const metrics = await this.echonet.getMetrics();
 
-        const tpw = registry.getSingleMetric('total_power_watts') as Gauge<any>;
-        const cpw = registry.getSingleMetric('circuit_power_watts') as Gauge<any>;
-        const pgw = registry.getSingleMetric('power_generated_watts') as Gauge<any>;
-        const pgk = registry.getSingleMetric('power_generated_kwh') as Gauge<any>;
-        const psk = registry.getSingleMetric('power_sold_kwh') as Gauge<any>;
+        const gaugeMetricNames = [
+            'power_total_in_kwh',
+            'power_total_out_kwh',
+            'power_total_watts',
+            'power_circuit_kwh',
+            'power_circuit_watts',
+            'power_generated_kwh',
+            'power_generated_watts',
+            'power_sold_kwh'
+        ]
 
-        for (const metric of metrics) {
-            switch(metric.name) {
-                case 'circuit_power_watts':
-                    cpw.set(
-                        {
-                            address: metric.address,
-                            echonet_group: metric.group,
-                            echonet_class: metric.class,
-                            circuit_id: metric.circuit
-                        },
-                        metric.value,
-                    );
-                    break;
-                case 'total_power_watts':
-                    tpw.set(
-                        {
-                            address: metric.address,
-                            echonet_group: metric.group,
-                            echonet_class: metric.class,
-                        },
-                        metric.value,
-                    );
-                    break;
-                case 'power_generated_watts':
-                    pgw.set(
-                        {
-                            address: metric.address,
-                            echonet_group: metric.group,
-                            echonet_class: metric.class,
-                        },
-                        metric.value,
-                    );
-                    break;
-                case 'power_generated_kwh':
-                    pgk.set(
-                        {
-                            address: metric.address,
-                            echonet_group: metric.group,
-                            echonet_class: metric.class,
-                        },
-                        metric.value,
-                    );
-                    break;
-                case 'power_generated_kwh':
-                    psk.set(
-                        {
-                            address: metric.address,
-                            echonet_group: metric.group,
-                            echonet_class: metric.class,
-                        },
-                        metric.value,
-                    );
-                    break;    
-            }
+        let registryMetric = {};
+        for(const name of gaugeMetricNames) {
+            registryMetric[name] = registry.getSingleMetric(name) as Gauge<any>;
         }
+        
+        for (const metric of metrics) {
+            if(metric.name.includes('circuit')) {
+                registryMetric[metric.name].set(
+                    {
+                        address: metric.address,
+                        echonet_group: metric.group,
+                        echonet_class: metric.class,
+                        circuit_id: metric.circuit
+                    },
+                    metric.value,
+                );
+            } else {
+                registryMetric[metric.name].set(
+                    {
+                        address: metric.address,
+                        echonet_group: metric.group,
+                        echonet_class: metric.class,
+                    },
+                    metric.value,
+                );
+            }
+       }
 
         return registry.metrics();
     }
