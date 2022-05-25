@@ -270,9 +270,9 @@ export default class ELProvider {
                         const values: number[] = [];
                         for(let i=2; i<=(prop['buffer'].length-4); i+=4) {
                             if (multiplier < 1) {
-                                values.push(buf.readUint32BE() / (1 / multiplier));
+                                values.push(buf.readUint32BE(i) / (1 / multiplier));
                             } else {
-                                values.push(buf.readUint32BE() * multiplier);
+                                values.push(buf.readUint32BE(i) * multiplier);
                             }
                         }
                         resolve(values);
@@ -295,8 +295,8 @@ export default class ELProvider {
                     if(prop['epc'] === epc && prop['buffer'] !== null) {
                         const buf = Buffer.from(prop['buffer']);
                         const values: number[] = [];
-                        for(let i=2; i<=(prop['buffer'].length-2); i+=2) {
-                            values.push(buf.readUint16BE(i))
+                        for(let i=2; i<=(prop['buffer'].length-4); i+=4) {
+                            values.push(buf.readInt32BE(i))
                         }
                         resolve(values);
                     }
