@@ -81,8 +81,13 @@ export default class ELProvider {
                 // console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
 
                 let metric: EchonetPowerMetric;
+
+                const powerUnitsKwh = await this.getEpcValueChar(device.address, device.eoj, 0xC2);
+                const multiplier = this.kwhMultiplier(powerUnitsKwh);
+                // console.log(`  Units: ${powerUnitsKwh} = x${multiplier}`);
+
             
-                const powerTotalInKw = await this.getEpcValueKwh(device.address, device.eoj, 0xC0);
+                const powerTotalInKw = await this.getEpcValueKwh(device.address, device.eoj, 0xC0, multiplier);
                 metric = {
                     name: 'power_total_in_kwh',
                     group: group_name,
@@ -92,7 +97,7 @@ export default class ELProvider {
                 }
                 m.push(metric);
 
-                const powerTotalOutKw = await this.getEpcValueKwh(device.address, device.eoj, 0xC1);
+                const powerTotalOutKw = await this.getEpcValueKwh(device.address, device.eoj, 0xC1, multiplier);
                 metric = {
                     name: 'power_total_out_kwh',
                     group: group_name,
@@ -112,7 +117,7 @@ export default class ELProvider {
                 }
                 m.push(metric);
 
-                const powerCircuitKwh = await this.getEpcListKwh(device.address, device.eoj, 0xB3);
+                const powerCircuitKwh = await this.getEpcListKwh(device.address, device.eoj, 0xB3, multiplier);
                 powerCircuitKwh.forEach((value: number, index: number): void => {
                     if(value === null) {
                         return;
@@ -143,12 +148,12 @@ export default class ELProvider {
                     }
                     m.push(metric);
                 });
-
             }
             
             if(group_code === 0x02 && class_code === 0x79) {
                 // console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
                 let metric:  EchonetPowerMetric;
+                const multiplier = 0.001;
 
                 const generatedWatts = await this.getEpcValueWatts(device.address, device.eoj, 0xE0);
                 metric = {
@@ -160,7 +165,7 @@ export default class ELProvider {
                 }
                 m.push(metric);
 
-                const generatedKwh = await this.getEpcValueKwh(device.address, device.eoj, 0xE1);
+                const generatedKwh = await this.getEpcValueKwh(device.address, device.eoj, 0xE1, multiplier);
                 metric = {
                     name: 'power_generated_kwh',
                     group: group_name,
@@ -170,7 +175,7 @@ export default class ELProvider {
                 }
                 m.push(metric);
 
-                const soldKwh = await this.getEpcValueKwh(device.address, device.eoj, 0xE3);
+                const soldKwh = await this.getEpcValueKwh(device.address, device.eoj, 0xE3, multiplier);
                 metric = {
                     name: 'power_sold_kwh',
                     group: group_name,
@@ -186,7 +191,7 @@ export default class ELProvider {
         return m;
     }
 
-    getEpcValueKwh(address, eoj, epc): Promise<number> {
+    getEpcValueChar(address, eoj, epc): Promise<number> {
         return new Promise(resolve => {
             this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
                 // console.log(`  ${JSON.stringify(res['message'])}`)
@@ -197,7 +202,32 @@ export default class ELProvider {
                 for(const prop of res['message']['prop']) {
                     if(prop['epc'] === epc && prop['buffer'] !== null) {
                         const buf = Buffer.from(prop['buffer']);
-                        const value = buf.readUint32BE() / 1000;                
+                        const value = buf.readUint8();
+                        resolve(value);
+                    }
+                }
+                resolve(0);
+            });
+        });
+    }
+
+    getEpcValueKwh(address, eoj, epc, multiplier): Promise<number> {
+        return new Promise(resolve => {
+            this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
+                // console.log(`  ${JSON.stringify(res['message'])}`)
+                if(err != null) {
+                    console.log(`Error: ${err}`);
+                    resolve(0);
+                }
+                for(const prop of res['message']['prop']) {
+                    if(prop['epc'] === epc && prop['buffer'] !== null) {
+                        const buf = Buffer.from(prop['buffer']);
+                        let value: number;
+                        if (multiplier < 1) {
+                            value = buf.readUint32BE() / (1 / multiplier);
+                        } else {
+                            value = buf.readUint32BE() * multiplier;
+                        }
                         resolve(value);
                     }
                 }
@@ -226,7 +256,7 @@ export default class ELProvider {
         });
     }
 
-    getEpcListKwh(address, eoj, epc): Promise<number[]> {
+    getEpcListKwh(address, eoj, epc, multiplier): Promise<number[]> {
         return new Promise(resolve => {
             this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
                 // console.log(`  ${JSON.stringify(res['message'])}`)
@@ -239,7 +269,11 @@ export default class ELProvider {
                         const buf = Buffer.from(prop['buffer']);
                         const values: number[] = [];
                         for(let i=2; i<=(prop['buffer'].length-4); i+=4) {
-                            values.push(buf.readUint32BE(i) / 1000)
+                            if (multiplier < 1) {
+                                values.push(buf.readUint32BE() / (1 / multiplier));
+                            } else {
+                                values.push(buf.readUint32BE() * multiplier);
+                            }
                         }
                         resolve(values);
                     }
@@ -272,6 +306,21 @@ export default class ELProvider {
         });
     }
 
+    kwhMultiplier(value): number {
+        switch(value) {
+            case 0x00: { return 1 }
+            case 0x01: { return 0.1 }
+            case 0x02: { return 0.01 }
+            case 0x03: { return 0.001 }
+            case 0x04: { return 0.0001 }
+            case 0x0A: { return 10 }
+            case 0x0B: { return 100 }
+            case 0x0C: { return 1000 }
+            case 0x0D: { return 10000 }
+        }
+    
+        return 1;
+    }
     stopDiscovery() {
         console.log("Stopping Echonet Lite discovery");
         this.echonet.stopDiscovery();
