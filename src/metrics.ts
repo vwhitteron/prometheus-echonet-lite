@@ -83,6 +83,12 @@ export default class MetricsProvider {
         }) );
 
         registry.registerMetric( new Gauge({
+            name:  'gas_used_cubic_meters',
+            help: 'total water used in litres',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
+        registry.registerMetric( new Gauge({
             name:  'air_temperature_celsius',
             help: 'air temperature in degrees celsius',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'location'],
@@ -113,7 +119,8 @@ export default class MetricsProvider {
             'water_available_litres',
             'water_used_litres',
             'water_temperature_celsius',
-            'air_temperature_celsius'
+            'air_temperature_celsius',
+            'gas_used_cubic_meters'
         ]
 
         let registryMetric = {};

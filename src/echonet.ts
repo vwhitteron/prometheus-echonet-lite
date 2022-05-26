@@ -195,11 +195,32 @@ export default class ELProvider {
             }
 
             // Water flow meter class
-            // if(group_code === 0x02 && class_code === 0x81) {
-            // }
+            if(group_code === 0x02 && class_code === 0x81) {
+                const waterVolumeUnits = await this.getEpcValue(device.address, device.eoj, 0xE1, 'uchar');
+                const multiplier = this.waterVolumeMultiplier(waterVolumeUnits);
+
+                const waterConsumedVolume = await this.getEpcValue(device.address, device.eoj, 0xE0, 'ulong');
+                metric = {
+                    name: 'water_used_litres',
+                    group: group_name,
+                    class: class_name,
+                    address: device.address,
+                    value: this.multiply(waterConsumedVolume, multiplier) / 1000,
+                }
+                m.push(metric);
+            }
 
             // Gas meter class
             // if(group_code === 0x02 && class_code === 0x82) {
+            //     const gasConsumedVolume = await this.getEpcValue(device.address, device.eoj, 0xE0, 'ulong');
+            //     metric = {
+            //         name: 'gas_used_cubic_meters',
+            //         group: group_name,
+            //         class: class_name,
+            //         address: device.address,
+            //         value: this.multiply(gasConsumedVolume, 0.001),
+            //     }
+            //     m.push(metric);
             // }
             
             // Electric water heater class
@@ -212,7 +233,6 @@ export default class ELProvider {
                     address: device.address,
                     value: waterTemperatureCelsius,
                 }
-                console.log(JSON.stringify(metric));
                 m.push(metric);
 
                 const waterCapacityLitres = await this.getEpcValue(device.address, device.eoj, 0xF8, 'ushort');
@@ -331,12 +351,7 @@ export default class ELProvider {
                 for(const prop of res['message']['prop']) {
                     if(prop['epc'] === epc && prop['buffer'] !== null) {
                         const buf = Buffer.from(prop['buffer']);
-                        let value: number;
-                        if (multiplier < 1) {
-                            value = buf.readUint32BE() / (1 / multiplier);
-                        } else {
-                            value = buf.readUint32BE() * multiplier;
-                        }
+                        const value = this.multiply(buf.readUint32BE(), multiplier);
                         resolve(value);
                     }
                 }
@@ -383,11 +398,7 @@ export default class ELProvider {
                         const buf = Buffer.from(prop['buffer']);
                         const values: number[] = [];
                         for(let i=2; i<=(prop['buffer'].length-4); i+=4) {
-                            if (multiplier < 1) {
-                                values.push(buf.readUint32BE(i) / (1 / multiplier));
-                            } else {
-                                values.push(buf.readUint32BE(i) * multiplier);
-                            }
+                            values.push(this.multiply(buf.readUint32BE(i), multiplier));
                         }
                         resolve(values);
                     }
@@ -420,6 +431,16 @@ export default class ELProvider {
         });
     }
 
+    multiply(value, multiplier) {
+        let newValue: number;
+        if (multiplier < 1) {
+            newValue = value / (1 / multiplier);
+        } else {
+            newValue = value / multiplier;
+        }
+        return newValue;
+    }
+
     kwhMultiplier(value): number {
         switch(value) {
             case 0x00: { return 1 }
@@ -435,6 +456,21 @@ export default class ELProvider {
     
         return 1;
     }
+
+    waterVolumeMultiplier(value): number {
+        switch(value) {
+            case 0x00: { return 1 }
+            case 0x01: { return 0.1 }
+            case 0x02: { return 0.01 }
+            case 0x03: { return 0.001 }
+            case 0x04: { return 0.0001 }
+            case 0x05: { return 0.00001 }
+            case 0x06: { return 0.000001 }
+        }
+    
+        return 1;
+    }
+
     stopDiscovery() {
         console.log("Stopping Echonet Lite discovery");
         this.echonet.stopDiscovery();
