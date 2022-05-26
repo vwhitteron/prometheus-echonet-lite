@@ -82,6 +82,12 @@ export default class MetricsProvider {
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
         }) );
 
+        registry.registerMetric( new Gauge({
+            name:  'air_temperature_celsius',
+            help: 'air temperature in degrees celsius',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'location'],
+        }) );
+
         return registry
     })
 
@@ -106,7 +112,8 @@ export default class MetricsProvider {
             'water_capacity_litres',
             'water_available_litres',
             'water_used_litres',
-            'water_temperature_celsius'
+            'water_temperature_celsius',
+            'air_temperature_celsius'
         ]
 
         let registryMetric = {};
@@ -115,13 +122,23 @@ export default class MetricsProvider {
         }
         
         for (const metric of metrics) {
-            if(metric.name.includes('circuit')) {
+            if(metric.circuit) {
                 registryMetric[metric.name].set(
                     {
                         address: metric.address,
                         echonet_group: metric.group,
                         echonet_class: metric.class,
                         circuit_id: metric.circuit
+                    },
+                    metric.value,
+                );
+                } else if(metric.location) {
+                registryMetric[metric.name].set(
+                    {
+                        address: metric.address,
+                        echonet_group: metric.group,
+                        echonet_class: metric.class,
+                        location: metric.location
                     },
                     metric.value,
                 );

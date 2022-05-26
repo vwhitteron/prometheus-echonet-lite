@@ -15,6 +15,7 @@ interface EchonetMetric {
     class: string;
     address: string;
     circuit?: number;
+    location?: string;
     value: number;
 }
 
@@ -88,7 +89,7 @@ export default class ELProvider {
             if(group_code === 0x02 && class_code === 0x87) {
                 // console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
 
-                const powerUnitsKwh = await this.getEpcValueChar(device.address, device.eoj, 0xC2);
+                const powerUnitsKwh = await this.getEpcValue(device.address, device.eoj, 0xC2, 'uchar');
                 const multiplier = this.kwhMultiplier(powerUnitsKwh);
                 // console.log(`  Units: ${powerUnitsKwh} = x${multiplier}`);
 
@@ -203,7 +204,7 @@ export default class ELProvider {
             
             // Electric water heater class
             if(group_code === 0x02 && class_code === 0x6B) {
-                const waterTemperatureCelsius = await this.getEpcValueChar(device.address, device.eoj, 0xC1);
+                const waterTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xC1, 'uchar');
                 metric = {
                     name: 'water_temperature_celsius',
                     group: group_name,
@@ -214,7 +215,7 @@ export default class ELProvider {
                 console.log(JSON.stringify(metric));
                 m.push(metric);
 
-                const waterCapacityLitres = await this.getEpcValueUShort(device.address, device.eoj, 0xF8);
+                const waterCapacityLitres = await this.getEpcValue(device.address, device.eoj, 0xF8, 'ushort');
                 metric = {
                     name: 'water_capacity_litres',
                     group: group_name,
@@ -224,7 +225,7 @@ export default class ELProvider {
                 }
                 m.push(metric);
 
-                const waterAvailableLitres = await this.getEpcValueUShort(device.address, device.eoj, 0xE1);
+                const waterAvailableLitres = await this.getEpcValue(device.address, device.eoj, 0xE1, 'ushort');
                 metric = {
                     name: 'water_available_litres',
                     group: group_name,
@@ -234,7 +235,7 @@ export default class ELProvider {
                 }
                 m.push(metric);
 
-                const waterUsedLitres = await this.getEpcValueLong(device.address, device.eoj, 0xF2);
+                const waterUsedLitres = await this.getEpcValue(device.address, device.eoj, 0xF2, 'long');
                 metric = {
                     name: 'water_used_litres',
                     group: group_name,
@@ -247,14 +248,35 @@ export default class ELProvider {
             }
 
             // Home air conditioner class
-            // if(group_code === 0x01 && class_code === 0x30) {
-            // }            
+            if(group_code === 0x01 && class_code === 0x30) {
+                const indoorTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xBB, 'char');
+                metric = {
+                    name: 'air_temperature_celsius',
+                    group: group_name,
+                    class: class_name,
+                    address: device.address,
+                    location: 'indoor',
+                    value: indoorTemperatureCelsius,
+                }
+                m.push(metric);
+
+                const outdoorTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xBE, 'char');
+                metric = {
+                    name: 'air_temperature_celsius',
+                    group: group_name,
+                    class: class_name,
+                    address: device.address,
+                    location: 'outdoor',
+                    value: outdoorTemperatureCelsius,
+                }
+                m.push(metric);
+            }            
         }
     
         return m;
     }
 
-    getEpcValueChar(address, eoj, epc): Promise<number> {
+    getEpcValue(address, eoj, epc, type): Promise<number> {
         return new Promise(resolve => {
             this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
                 // console.log(`  [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
@@ -265,48 +287,32 @@ export default class ELProvider {
                 for(const prop of res['message']['prop']) {
                     if(prop['epc'] === epc && prop['buffer'] !== null) {
                         const buf = Buffer.from(prop['buffer']);
-                        const value = buf.readUint8();
-                        resolve(value);
-                    }
-                }
-                resolve(0);
-            });
-        });
-    }
-
-    getEpcValueUShort(address, eoj, epc): Promise<number> {
-        return new Promise(resolve => {
-            this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
-                // console.log(`  [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
-                if(err != null) {
-                    console.log(`Error: ${err}`);
-                    resolve(0);
-                }
-                for(const prop of res['message']['prop']) {
-                    if(prop['epc'] === epc && prop['buffer'] !== null) {
-                        const buf = Buffer.from(prop['buffer']);
-                        const value = buf.readUint16BE();
-                        resolve(value);
-                    }
-                }
-                resolve(0);
-            });
-        });
-    }
-
-    getEpcValueLong(address, eoj, epc): Promise<number> {
-        return new Promise(resolve => {
-            this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
-                // console.log(`  [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
-                if(err != null) {
-                    console.log(`Error: ${err}`);
-                    resolve(0);
-                }
-                for(const prop of res['message']['prop']) {
-                    if(prop['epc'] === epc && prop['buffer'] !== null) {
-                        const buf = Buffer.from(prop['buffer']);
-                        const value = buf.readInt32BE();
-                        resolve(value);
+                        switch(type) {
+                            case 'char': {
+                                resolve(buf.readInt8());
+                                break;
+                            }
+                            case 'uchar': {
+                                resolve(buf.readUint8());
+                                break;
+                            }
+                            case 'short': {
+                                resolve(buf.readInt16BE());
+                                break;
+                            }
+                            case 'ushort': {
+                                resolve(buf.readUint16BE());
+                                break;
+                            }
+                            case 'long': {
+                                resolve(buf.readInt32BE());
+                                break;
+                            }
+                            case 'ulong': {
+                                resolve(buf.readUint32BE());
+                                break;
+                            }
+                        }
                     }
                 }
                 resolve(0);
