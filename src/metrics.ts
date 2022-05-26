@@ -58,6 +58,30 @@ export default class MetricsProvider {
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
         }) );
 
+        registry.registerMetric( new Gauge({
+            name:  'water_capacity_litres',
+            help: 'total water capacity in litres',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
+        registry.registerMetric( new Gauge({
+            name:  'water_available_litres',
+            help: 'total water available in litres',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
+        registry.registerMetric( new Gauge({
+            name:  'water_temperature_celsius',
+            help: 'water temperature in degrees celsius',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
+        registry.registerMetric( new Gauge({
+            name:  'water_used_litres',
+            help: 'total water used in litres',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
+        }) );
+
         return registry
     })
 
@@ -78,7 +102,11 @@ export default class MetricsProvider {
             'power_circuit_watts',
             'power_generated_kwh',
             'power_generated_watts',
-            'power_sold_kwh'
+            'power_sold_kwh',
+            'water_capacity_litres',
+            'water_available_litres',
+            'water_used_litres',
+            'water_temperature_celsius'
         ]
 
         let registryMetric = {};
