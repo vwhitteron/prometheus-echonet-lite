@@ -199,14 +199,18 @@ export default class ELProvider {
                 const waterVolumeUnits = await this.getEpcValue(device.address, device.eoj, 0xE1, unsigned);
                 const multiplier = this.waterVolumeMultiplier(waterVolumeUnits);
 
+                console.log(`waterVolumeUnits: ${waterVolumeUnits}`);
+                console.log(`multiplier: ${multiplier}`);
+
                 const waterConsumedVolume = await this.getEpcValue(device.address, device.eoj, 0xE0, unsigned);
                 metric = {
                     name: 'water_used_litres',
                     group: group_name,
                     class: class_name,
                     address: device.address,
-                    value: this.scaleValue(waterConsumedVolume, multiplier) / 1000,
+                    value: this.scaleValue(waterConsumedVolume, multiplier) * 1000,
                 }
+                console.log(`metric: ${metric.value}`)
                 m.push(metric);
             }
 
@@ -296,7 +300,7 @@ export default class ELProvider {
         return m;
     }
 
-    getEpcValue(address, eoj, epc, signed: boolean): Promise<number> {
+    getEpcValue(address: string, eoj: number[], epc: number, signed: boolean): Promise<number> {
         return new Promise(resolve => {
             this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
                 // console.log(`  [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
@@ -315,7 +319,7 @@ export default class ELProvider {
         });
     }
 
-    getEpcList(address, eoj, epc, signed: boolean): Promise<number[]> {
+    getEpcList(address: string, eoj: number[], epc: number, signed: boolean): Promise<number[]> {
         return new Promise(resolve => {
             this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
                 // console.log(`  [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
@@ -363,7 +367,7 @@ export default class ELProvider {
         return 0
     }
 
-    scaleValue(value, multiplier) {
+    scaleValue(value: number, multiplier: number): number {
         let newValue: number;
         if (multiplier < 1) {
             newValue = value / (1 / multiplier);
@@ -373,7 +377,7 @@ export default class ELProvider {
         return newValue;
     }
 
-    kwhMultiplier(value): number {
+    kwhMultiplier(value: number): number {
         switch(value) {
             case 0x00: { return 1 }
             case 0x01: { return 0.1 }
@@ -389,7 +393,7 @@ export default class ELProvider {
         return 1;
     }
 
-    waterVolumeMultiplier(value): number {
+    waterVolumeMultiplier(value: number): number {
         switch(value) {
             case 0x00: { return 1 }
             case 0x01: { return 0.1 }
