@@ -10,96 +10,102 @@ export default class MetricsProvider {
 
         const registry = new Registry()
 
-        registry.registerMetric( new Gauge({
-            name:  'power_total_in_kwh',
+        registry.registerMetric(new Gauge({
+            name: 'power_total_in_kwh',
             help: 'Cumulative total incoming power in kwh',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'power_total_out_kwh',
+        registry.registerMetric(new Gauge({
+            name: 'power_total_out_kwh',
             help: 'Cumulative total outgoing power in kwh',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'power_total_watts',
+        registry.registerMetric(new Gauge({
+            name: 'power_total_watts',
             help: 'total power in watts',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'power_circuit_kwh',
+        registry.registerMetric(new Gauge({
+            name: 'power_circuit_kwh',
             help: 'cumulative circuit power in kwh',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'circuit_id', 'circuit_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'power_circuit_watts',
+        registry.registerMetric(new Gauge({
+            name: 'power_circuit_watts',
             help: 'circuit power in watts',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'circuit_id', 'circuit_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'power_generated_watts',
+        registry.registerMetric(new Gauge({
+            name: 'power_generated_watts',
             help: 'power generated in Watts',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'power_generated_kwh',
+        registry.registerMetric(new Gauge({
+            name: 'power_generated_kwh',
             help: 'cumulative power generated in kWh',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'power_sold_kwh',
+        registry.registerMetric(new Gauge({
+            name: 'power_sold_kwh',
             help: 'cumulative power sold in kWh',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'water_capacity_litres',
+        registry.registerMetric(new Gauge({
+            name: 'water_capacity_litres',
             help: 'total water capacity in litres',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'water_available_litres',
+        registry.registerMetric(new Gauge({
+            name: 'water_available_litres',
             help: 'total water available in litres',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'water_temperature_celsius',
+        registry.registerMetric(new Gauge({
+            name: 'water_temperature_celsius',
             help: 'water temperature in degrees celsius',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'water_used_litres',
+        registry.registerMetric(new Gauge({
+            name: 'water_used_litres',
             help: 'total water used in litres',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'gas_used_cubic_meters',
+        registry.registerMetric(new Gauge({
+            name: 'gas_used_cubic_meters',
             help: 'total water used in litres',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-        }) );
+        }));
 
-        registry.registerMetric( new Gauge({
-            name:  'air_temperature_celsius',
+        registry.registerMetric(new Gauge({
+            name: 'air_temperature_celsius',
             help: 'air temperature in degrees celsius',
             labelNames: ['address', 'echonet_group', 'echonet_class', 'location'],
-        }) );
+        }));
+
+        registry.registerMetric(new Gauge({
+            name: 'air_relative_humidity_percent',
+            help: 'air relative humidity in percent',
+            labelNames: ['address', 'echonet_group', 'echonet_class', 'location'],
+        }));
 
         return registry
     })
 
     static registry: Registry = MetricsProvider.initRegistry()
 
-    static echonet = new ELProvider(); 
+    static echonet = new ELProvider();
 
     public static getMetrics = async () => {
         const registry = MetricsProvider.registry
@@ -120,16 +126,17 @@ export default class MetricsProvider {
             'water_used_litres',
             'water_temperature_celsius',
             'air_temperature_celsius',
+            'air_relative_humidity_percent',
             'gas_used_cubic_meters'
         ]
 
         let registryMetric = {};
-        for(const name of gaugeMetricNames) {
+        for (const name of gaugeMetricNames) {
             registryMetric[name] = registry.getSingleMetric(name) as Gauge<any>;
         }
-        
+
         for (const metric of metrics) {
-            if(metric.circuit) {
+            if (metric.circuit) {
                 registryMetric[metric.name].set(
                     {
                         address: metric.address,
@@ -139,7 +146,7 @@ export default class MetricsProvider {
                     },
                     metric.value,
                 );
-                } else if(metric.location) {
+            } else if (metric.location) {
                 registryMetric[metric.name].set(
                     {
                         address: metric.address,
@@ -159,7 +166,7 @@ export default class MetricsProvider {
                     metric.value,
                 );
             }
-       }
+        }
 
         return registry.metrics();
     }

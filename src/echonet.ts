@@ -35,20 +35,20 @@ export default class ELProvider {
         this.devices = new Array<EchonetDevice>();
 
         this.echonet.init((err) => {
-            if(err) {
+            if (err) {
                 this.showErrorExit(err);
-            } else { 
+            } else {
                 this.discoverDevices();
-                setTimeout(() => {this.stopDiscovery()}, 5000);
+                setTimeout(() => { this.stopDiscovery() }, 5000);
             }
         });
     }
 
     discoverDevices() {
         console.log("Starting Echonet Lite discovery");
-      
+
         this.echonet.startDiscovery((err, res) => {
-            if(err) {
+            if (err) {
                 this.showErrorExit(err);
             }
 
@@ -63,8 +63,8 @@ export default class ELProvider {
                 const className = this.echonet.getClassName(group_code, class_code);
 
                 const eojHex = JSON.stringify(eoj, (key, value) => {
-                    if( typeof value === 'number'){
-                      return '0x' + value.toString(16)
+                    if (typeof value === 'number') {
+                        return '0x' + value.toString(16)
                     }
                     return value
                 });
@@ -80,7 +80,7 @@ export default class ELProvider {
 
     async getMetrics(): Promise<EchonetMetric[]> {
         const m: EchonetMetric[] = [];
-        
+
         for await (const device of this.devices) {
             const group_code = device.eoj[0];
             const class_code = device.eoj[1];
@@ -89,7 +89,7 @@ export default class ELProvider {
             let metric: EchonetMetric;
 
             // Distribution panel metering class
-            if(group_code === 0x02 && class_code === 0x87) {
+            if (group_code === 0x02 && class_code === 0x87) {
                 // console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
                 const powerUnitsKwh = await this.getEpcValue(device.address, device.eoj, 0xC2, unsigned);
                 const multiplier = this.kwhMultiplier(powerUnitsKwh);
@@ -126,7 +126,7 @@ export default class ELProvider {
 
                 const powerCircuitKwh = await this.getEpcList(device.address, device.eoj, 0xB3, unsigned);
                 powerCircuitKwh.forEach((circuitValue: number, index: number): void => {
-                    if(circuitValue === null) {
+                    if (circuitValue === null) {
                         return;
                     }
                     metric = {
@@ -142,7 +142,7 @@ export default class ELProvider {
 
                 const powerCircuitWatts = await this.getEpcList(device.address, device.eoj, 0xB7, signed);
                 powerCircuitWatts.forEach((value: number, index: number): void => {
-                    if(value === null) {
+                    if (value === null) {
                         return;
                     }
                     metric = {
@@ -156,9 +156,9 @@ export default class ELProvider {
                     m.push(metric);
                 });
             }
-            
+
             // Home solar power generation class
-            if(group_code === 0x02 && class_code === 0x79) {
+            if (group_code === 0x02 && class_code === 0x79) {
                 // console.log(`Collecting metrics from [${device.address}] - group: ${group_name}, class: ${class_name}`)
                 const multiplier = 0.001;
 
@@ -195,7 +195,7 @@ export default class ELProvider {
             }
 
             // Water flow meter class
-            if(group_code === 0x02 && class_code === 0x81) {
+            if (group_code === 0x02 && class_code === 0x81) {
                 const waterVolumeUnits = await this.getEpcValue(device.address, device.eoj, 0xE1, unsigned);
                 const multiplier = this.waterVolumeMultiplier(waterVolumeUnits);
 
@@ -226,9 +226,9 @@ export default class ELProvider {
             //     }
             //     m.push(metric);
             // }
-            
+
             // Electric water heater class
-            if(group_code === 0x02 && class_code === 0x6B) {
+            if (group_code === 0x02 && class_code === 0x6B) {
                 const waterTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xC1, unsigned);
                 metric = {
                     name: 'water_temperature_celsius',
@@ -272,7 +272,7 @@ export default class ELProvider {
             }
 
             // Home air conditioner class
-            if(group_code === 0x01 && class_code === 0x30) {
+            if (group_code === 0x01 && class_code === 0x30) {
                 const indoorTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xBB, true);
                 metric = {
                     name: 'air_temperature_celsius',
@@ -294,22 +294,79 @@ export default class ELProvider {
                     value: outdoorTemperatureCelsius,
                 }
                 m.push(metric);
-            }            
+
+                const indoorRelativeHumidityPercent = await this.getEpcValue(device.address, device.eoj, 0xBA, true);
+                metric = {
+                    name: 'air_relative_humidity_percent',
+                    group: group_name,
+                    class: class_name,
+                    address: device.address,
+                    location: 'indoor',
+                    value: indoorRelativeHumidityPercent,
+                }
+                m.push(metric);
+            }
+
+            // Single function lighting class
+            // Appendix_Release_Q_E.pdf page 3-437
+            if (group_code === 0x02 && class_code === 0xa3) {
+                // const operationStatus = await this.getEpcValue(device.address, device.eoj, 0x80, true);
+                // const illuminationLevelSetting = await this.getEpcValue(device.address, device.eoj, 0xB0, true);
+                // console.log(`Operation status: ${operationStatus}`)
+                // console.log(`Illumination level: ${illuminationLevelSetting}`)
+                const eojHex = JSON.stringify(device.eoj, (key, value) => {
+                    if (typeof value === 'number') {
+                        return '0x' + value.toString(16)
+                    }
+                    return value
+                });
+                console.log(`Setting light on - ${eojHex}`);
+                this.setEpcValue(device.address, device.eoj, 0x80, 0x31);
+            }
+
+            // Lighting system class
+            // Appendix_Release_Q_E.pdf page 3-459
+            // if(group_code === 0x02 && class_code === 0xa3) {
+            //     const operationStatus = await this.getEpcValue(device.address, device.eoj, 0x80, true);
+            //     const illuminationLevelSetting = await this.getEpcValue(device.address, device.eoj, 0xB0, true);
+            //     const sceneControlSetting = await this.getEpcValue(device.address, device.eoj, 0xC0, true);
+            //     const sceneControlMax = await this.getEpcValue(device.address, device.eoj, 0xC1, true);
+            // }
         }
-    
+
         return m;
     }
 
     getEpcValue(address: string, eoj: number[], epc: number, signed: boolean): Promise<number> {
         return new Promise(resolve => {
             this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
-                // console.log(`  [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
-                if(err != null) {
+                console.log(`  EPC GET: [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
+                if (err != null) {
                     console.log(`Error: ${err}`);
                     resolve(0);
                 }
-                for(const prop of res['message']['prop']) {
-                    if(prop['epc'] === epc && prop['buffer'] !== null) {
+                for (const prop of res['message']['prop']) {
+                    if (prop['epc'] === epc && prop['buffer'] !== null) {
+                        const buf = Buffer.from(prop['buffer']);
+                        resolve(this.convertValue(buf, signed));
+                    }
+                }
+                resolve(0);
+            });
+        });
+    }
+
+    setEpcValue(address: string, eoj: number[], epc: number, edt: number): Promise<number> {
+        return new Promise(resolve => {
+            console.log(`  EPC SET: [${address}] - eoj=0x${eoj.toString()}, epc=0x${epc.toString(16)}, edt=0x${edt.toString(16)}`)
+            this.echonet.setPropertyValue(address, eoj, epc, edt, (err, res) => {
+                // console.log(`  EPC SET: [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
+                if (err != null) {
+                    console.log(`Error: ${err}`);
+                    resolve(0);
+                }
+                for (const prop of res['message']['prop']) {
+                    if (prop['epc'] === epc && prop['buffer'] !== null) {
                         const buf = Buffer.from(prop['buffer']);
                         resolve(this.convertValue(buf, signed));
                     }
@@ -322,21 +379,21 @@ export default class ELProvider {
     getEpcList(address: string, eoj: number[], epc: number, signed: boolean): Promise<number[]> {
         return new Promise(resolve => {
             this.echonet.getPropertyValue(address, eoj, epc, (err, res) => {
-                // console.log(`  [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
-                if(err != null) {
+                // console.log(`  EPC GET: [${address}] - ${'0x' + epc.toString(16)} - ${JSON.stringify(res['message'])}`)
+                if (err != null) {
                     console.log(`Error: ${err}`);
                     resolve([]);
                 }
-                for(const prop of res['message']['prop']) {
-                    if(prop['epc'] === epc && prop['buffer'] !== null) {
+                for (const prop of res['message']['prop']) {
+                    if (prop['epc'] === epc && prop['buffer'] !== null) {
                         const buf = Buffer.from(prop['buffer']);
 
                         const aryLen = buf[1] - buf[0] + 1;
                         const valLen = (buf.length - 2) / aryLen;
 
                         const values: number[] = [];
-                        for(let i=2; i<=(prop['buffer'].length-valLen); i+=valLen) {
-                            values.push(this.convertValue(buf.slice(i, i+valLen), signed));
+                        for (let i = 2; i <= (prop['buffer'].length - valLen); i += valLen) {
+                            values.push(this.convertValue(buf.slice(i, i + valLen), signed));
                         }
                         resolve(values);
                     }
@@ -350,18 +407,18 @@ export default class ELProvider {
         const buf = Buffer.from(buffer);
         let value: number;
 
-        if(signed) {
-            switch(buf.byteLength) {
+        if (signed) {
+            switch (buf.byteLength) {
                 case 1: { return buf.readInt8() }
                 case 2: { return buf.readInt16BE() }
                 case 4: { return buf.readInt32BE() }
             }
         } else {
-            switch(buf.byteLength) {
+            switch (buf.byteLength) {
                 case 1: { return buf.readUint8() }
                 case 2: { return buf.readUint16BE() }
                 case 4: { return buf.readUint32BE() }
-            }    
+            }
         }
 
         return 0
@@ -378,7 +435,7 @@ export default class ELProvider {
     }
 
     kwhMultiplier(value: number): number {
-        switch(value) {
+        switch (value) {
             case 0x00: { return 1 }
             case 0x01: { return 0.1 }
             case 0x02: { return 0.01 }
@@ -389,12 +446,12 @@ export default class ELProvider {
             case 0x0C: { return 1000 }
             case 0x0D: { return 10000 }
         }
-    
+
         return 1;
     }
 
     waterVolumeMultiplier(value: number): number {
-        switch(value) {
+        switch (value) {
             case 0x00: { return 1 }
             case 0x01: { return 0.1 }
             case 0x02: { return 0.01 }
@@ -403,7 +460,7 @@ export default class ELProvider {
             case 0x05: { return 0.00001 }
             case 0x06: { return 0.000001 }
         }
-    
+
         return 1;
     }
 
@@ -415,13 +472,13 @@ export default class ELProvider {
     async shutdown() {
         console.log("Shutting down");
         this.echonet.close(() => {
-          console.log('Closed');
+            console.log('Closed');
         });
-        setTimeout(() => {process.exit();}, 1000);
+        setTimeout(() => { process.exit(); }, 1000);
     }
 
     showErrorExit(err) {
-        console.log('[ERROR] '+ err.toString());
+        console.log('[ERROR] ' + err.toString());
         process.exit();
     }
 }
