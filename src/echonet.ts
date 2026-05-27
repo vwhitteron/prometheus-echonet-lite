@@ -1,9 +1,7 @@
-import { Buffer } from 'buffer';
 import EchonetLite, {
     EchonetDiscoveryResponse,
     EchonetPropertyResponse,
 } from 'node-echonet-lite';
-import process from 'process';
 import logger from './logger';
 
 // ─── Device class identifiers ───────────────────────────────────────────────
@@ -37,10 +35,17 @@ export interface EchonetMetric {
 
 /** Reject after `ms` milliseconds with a TimeoutError. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>;
     return Promise.race([
-        promise,
+        promise.then(result => {
+            clearTimeout(timer);
+            return result;
+        }).catch(err => {
+            clearTimeout(timer);
+            throw err;
+        }),
         new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms)
+            timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms)
         ),
     ]);
 }
@@ -65,13 +70,17 @@ function deviceKey(address: string, eoj: number[]): string {
 }
 
 export default class ELProvider {
-    echonet: EchonetLite;
-    devices: Map<string, EchonetDevice>;
+    private echonet: EchonetLite;
+    private devices: Map<string, EchonetDevice>;
 
     private readonly discoveryIntervalMs: number;
     private readonly discoveryDurationMs: number;
     private readonly requestTimeoutMs: number;
     private discoveryTimer: ReturnType<typeof setInterval> | null = null;
+    private discovering = false;
+
+    // Request queue to serialize EPC requests over the single UDP socket
+    private requestQueue: Promise<void> = Promise.resolve();
 
     constructor(netif: string, discoveryIntervalSecs: number, discoveryDurationSecs: number, requestTimeoutSecs: number = 5) {
         this.echonet = new EchonetLite({
@@ -86,7 +95,7 @@ export default class ELProvider {
 
         this.echonet.init((err: Error | null) => {
             if (err) {
-                this.showErrorExit(err);
+                this.logError(err);
             } else {
                 this.startDiscoveryCycle();
                 this.discoveryTimer = setInterval(
@@ -98,16 +107,24 @@ export default class ELProvider {
     }
 
     private startDiscoveryCycle(): void {
+        if (this.discovering) {
+            logger.warn('Discovery already in progress, skipping');
+            return;
+        }
+        this.discovering = true;
         this.discoverDevices();
-        setTimeout(() => { this.stopDiscovery(); }, this.discoveryDurationMs);
+        setTimeout(() => {
+            this.stopDiscovery();
+            this.discovering = false;
+        }, this.discoveryDurationMs);
     }
 
-    discoverDevices(): void {
+    private discoverDevices(): void {
         logger.info('Starting Echonet Lite discovery');
 
         this.echonet.startDiscovery((err: Error | null, res: EchonetDiscoveryResponse) => {
             if (err) {
-                this.showErrorExit(err);
+                this.logError(err);
                 return;
             }
 
@@ -138,88 +155,9 @@ export default class ELProvider {
         const metrics: EchonetMetric[] = [];
 
         for (const device of this.devices.values()) {
-            const groupCode = device.eoj[0];
-            const classCode = device.eoj[1];
-            const groupName = this.echonet.getClassGroupName(groupCode);
-            const className = this.echonet.getClassName(groupCode, classCode);
-
             try {
-                // Distribution panel metering class
-                if (groupCode === DEVICE_CLASSES.DISTRIBUTION_PANEL.group && classCode === DEVICE_CLASSES.DISTRIBUTION_PANEL.class) {
-                    const powerUnitsKwh = await this.getEpcValue(device.address, device.eoj, 0xC2, false);
-                    const multiplier = this.kwhMultiplier(powerUnitsKwh ?? 0x00);
-
-                    const powerTotalInKwh = await this.getEpcValue(device.address, device.eoj, 0xC0, false);
-                    if (powerTotalInKwh !== null) metrics.push(makeMetric('power_total_in_kwh', groupName, className, device.address, this.scaleValue(powerTotalInKwh, multiplier)));
-
-                    const powerTotalOutKwh = await this.getEpcValue(device.address, device.eoj, 0xC1, false);
-                    if (powerTotalOutKwh !== null) metrics.push(makeMetric('power_total_out_kwh', groupName, className, device.address, this.scaleValue(powerTotalOutKwh, multiplier)));
-
-                    const powerTotalWatts = await this.getEpcValue(device.address, device.eoj, 0xC6, true);
-                    if (powerTotalWatts !== null) metrics.push(makeMetric('power_total_watts', groupName, className, device.address, powerTotalWatts));
-
-                    const powerCircuitKwh = await this.getEpcList(device.address, device.eoj, 0xB3, false);
-                    powerCircuitKwh.forEach((circuitValue, index) => {
-                        if (circuitValue === null) return;
-                        metrics.push(makeMetric('power_circuit_kwh', groupName, className, device.address, this.scaleValue(circuitValue, multiplier), { circuit: index + 1 }));
-                    });
-
-                    const powerCircuitWatts = await this.getEpcList(device.address, device.eoj, 0xB7, true);
-                    powerCircuitWatts.forEach((value, index) => {
-                        if (value === null) return;
-                        metrics.push(makeMetric('power_circuit_watts', groupName, className, device.address, value, { circuit: index + 1 }));
-                    });
-                }
-
-                // Home solar power generation class
-                if (groupCode === DEVICE_CLASSES.SOLAR_POWER.group && classCode === DEVICE_CLASSES.SOLAR_POWER.class) {
-                    const solarMultiplier = 0.001;
-
-                    const generatedWatts = await this.getEpcValue(device.address, device.eoj, 0xE0, false);
-                    if (generatedWatts !== null) metrics.push(makeMetric('power_generated_watts', groupName, className, device.address, generatedWatts));
-
-                    const generatedKwh = await this.getEpcValue(device.address, device.eoj, 0xE1, false);
-                    if (generatedKwh !== null) metrics.push(makeMetric('power_generated_kwh', groupName, className, device.address, this.scaleValue(generatedKwh, solarMultiplier)));
-
-                    const soldKwh = await this.getEpcValue(device.address, device.eoj, 0xE3, false);
-                    if (soldKwh !== null) metrics.push(makeMetric('power_sold_kwh', groupName, className, device.address, this.scaleValue(soldKwh, solarMultiplier)));
-                }
-
-                // Water flow meter class
-                if (groupCode === DEVICE_CLASSES.WATER_FLOW_METER.group && classCode === DEVICE_CLASSES.WATER_FLOW_METER.class) {
-                    const waterVolumeUnits = await this.getEpcValue(device.address, device.eoj, 0xE1, false);
-                    const multiplier = this.waterVolumeMultiplier(waterVolumeUnits ?? 0x00);
-
-                    const waterConsumedVolume = await this.getEpcValue(device.address, device.eoj, 0xE0, false);
-                    if (waterConsumedVolume !== null) metrics.push(makeMetric('water_used_litres', groupName, className, device.address, this.scaleValue(waterConsumedVolume, multiplier) * 1000));
-                }
-
-                // Electric water heater class
-                if (groupCode === DEVICE_CLASSES.ELECTRIC_WATER_HEATER.group && classCode === DEVICE_CLASSES.ELECTRIC_WATER_HEATER.class) {
-                    const waterTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xC1, false);
-                    if (waterTemperatureCelsius !== null) metrics.push(makeMetric('water_temperature_celsius', groupName, className, device.address, waterTemperatureCelsius));
-
-                    const waterCapacityLitres = await this.getEpcValue(device.address, device.eoj, 0xF8, false);
-                    if (waterCapacityLitres !== null) metrics.push(makeMetric('water_capacity_litres', groupName, className, device.address, waterCapacityLitres));
-
-                    const waterAvailableLitres = await this.getEpcValue(device.address, device.eoj, 0xE1, false);
-                    if (waterAvailableLitres !== null) metrics.push(makeMetric('water_available_litres', groupName, className, device.address, waterAvailableLitres));
-
-                    const waterUsedLitres = await this.getEpcValue(device.address, device.eoj, 0xF2, true);
-                    if (waterUsedLitres !== null) metrics.push(makeMetric('water_used_litres', groupName, className, device.address, waterUsedLitres));
-                }
-
-                // Home air conditioner class
-                if (groupCode === DEVICE_CLASSES.HOME_AIR_CONDITIONER.group && classCode === DEVICE_CLASSES.HOME_AIR_CONDITIONER.class) {
-                    const indoorTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xBB, true);
-                    if (indoorTemperatureCelsius !== null) metrics.push(makeMetric('air_temperature_celsius', groupName, className, device.address, indoorTemperatureCelsius, { location: 'indoor' }));
-
-                    const outdoorTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xBE, true);
-                    if (outdoorTemperatureCelsius !== null) metrics.push(makeMetric('air_temperature_celsius', groupName, className, device.address, outdoorTemperatureCelsius, { location: 'outdoor' }));
-
-                    const indoorRelativeHumidityPercent = await this.getEpcValue(device.address, device.eoj, 0xBA, true);
-                    if (indoorRelativeHumidityPercent !== null) metrics.push(makeMetric('air_relative_humidity_percent', groupName, className, device.address, indoorRelativeHumidityPercent, { location: 'indoor' }));
-                }
+                const deviceMetrics = await this.collectDeviceMetrics(device);
+                metrics.push(...deviceMetrics);
             } catch (err) {
                 logger.error(`Error collecting metrics from device ${device.address} [${device.eoj.map(b => '0x' + b.toString(16)).join(':')}]: ${err}`);
             }
@@ -228,26 +166,160 @@ export default class ELProvider {
         return metrics;
     }
 
+    async collectDeviceMetrics(device: EchonetDevice): Promise<EchonetMetric[]> {
+        const metrics: EchonetMetric[] = [];
+        const groupCode = device.eoj[0];
+        const classCode = device.eoj[1];
+        const groupName = this.echonet.getClassGroupName(groupCode);
+        const className = this.echonet.getClassName(groupCode, classCode);
+
+        // ── Distribution panel metering class ──────────────────────────────
+        // 0xC2 (kWh units) is needed as a multiplier for 0xC0, 0xC1, 0xB3.
+        // All EPC reads must be sequential to avoid conflicts with the single UDP socket.
+        if (groupCode === DEVICE_CLASSES.DISTRIBUTION_PANEL.group && classCode === DEVICE_CLASSES.DISTRIBUTION_PANEL.class) {
+            const powerUnitsKwh = await this.getEpcValue(device.address, device.eoj, 0xC2, false);
+            const multiplier = this.kwhMultiplier(powerUnitsKwh ?? 0x00);
+
+            const powerTotalInKwh = await this.getEpcValue(device.address, device.eoj, 0xC0, false);
+            if (powerTotalInKwh !== null) {
+                metrics.push(makeMetric('power_total_in_kwh', groupName, className, device.address, this.scaleValue(powerTotalInKwh, multiplier)));
+            }
+
+            const powerTotalOutKwh = await this.getEpcValue(device.address, device.eoj, 0xC1, false);
+            if (powerTotalOutKwh !== null) {
+                metrics.push(makeMetric('power_total_out_kwh', groupName, className, device.address, this.scaleValue(powerTotalOutKwh, multiplier)));
+            }
+
+            const powerTotalWatts = await this.getEpcValue(device.address, device.eoj, 0xC6, true);
+            if (powerTotalWatts !== null) {
+                metrics.push(makeMetric('power_total_watts', groupName, className, device.address, powerTotalWatts));
+            }
+
+            const powerCircuitKwh = await this.getEpcList(device.address, device.eoj, 0xB3, false);
+            powerCircuitKwh.forEach((circuitValue, index) => {
+                if (circuitValue === null) return;
+                metrics.push(makeMetric('power_circuit_kwh', groupName, className, device.address, this.scaleValue(circuitValue, multiplier), { circuit: index + 1 }));
+            });
+
+            const powerCircuitWatts = await this.getEpcList(device.address, device.eoj, 0xB7, true);
+            powerCircuitWatts.forEach((value, index) => {
+                if (value === null) return;
+                metrics.push(makeMetric('power_circuit_watts', groupName, className, device.address, value, { circuit: index + 1 }));
+            });
+        }
+
+        // ── Home solar power generation class ──────────────────────────────
+        if (groupCode === DEVICE_CLASSES.SOLAR_POWER.group && classCode === DEVICE_CLASSES.SOLAR_POWER.class) {
+            const solarMultiplier = 0.001; // Wh to kWh
+
+            const generatedWatts = await this.getEpcValue(device.address, device.eoj, 0xE0, false);
+            if (generatedWatts !== null) {
+                metrics.push(makeMetric('power_generated_watts', groupName, className, device.address, generatedWatts));
+            }
+
+            const generatedKwh = await this.getEpcValue(device.address, device.eoj, 0xE1, false);
+            if (generatedKwh !== null) {
+                metrics.push(makeMetric('power_generated_kwh', groupName, className, device.address, this.scaleValue(generatedKwh, solarMultiplier)));
+            }
+
+            const soldKwh = await this.getEpcValue(device.address, device.eoj, 0xE3, false);
+            if (soldKwh !== null) {
+                metrics.push(makeMetric('power_sold_kwh', groupName, className, device.address, this.scaleValue(soldKwh, solarMultiplier)));
+            }
+        }
+
+        // ── Water flow meter class ─────────────────────────────────────────
+        // 0xE1 (volume units) is needed as a multiplier for 0xE0.
+        if (groupCode === DEVICE_CLASSES.WATER_FLOW_METER.group && classCode === DEVICE_CLASSES.WATER_FLOW_METER.class) {
+            const waterVolumeUnits = await this.getEpcValue(device.address, device.eoj, 0xE1, false);
+            const multiplier = this.waterVolumeMultiplier(waterVolumeUnits ?? 0x00);
+
+            const waterConsumedVolume = await this.getEpcValue(device.address, device.eoj, 0xE0, false);
+            if (waterConsumedVolume !== null) {
+                const M3_TO_LITRES = 1000;
+                metrics.push(makeMetric('water_used_litres', groupName, className, device.address, waterConsumedVolume * multiplier * M3_TO_LITRES));
+            }
+        }
+
+        // ── Electric water heater class ────────────────────────────────────
+        if (groupCode === DEVICE_CLASSES.ELECTRIC_WATER_HEATER.group && classCode === DEVICE_CLASSES.ELECTRIC_WATER_HEATER.class) {
+            const waterTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xC1, false);
+            if (waterTemperatureCelsius !== null) {
+                metrics.push(makeMetric('water_temperature_celsius', groupName, className, device.address, waterTemperatureCelsius));
+            }
+
+            const waterCapacityLitres = await this.getEpcValue(device.address, device.eoj, 0xF8, false);
+            if (waterCapacityLitres !== null) {
+                metrics.push(makeMetric('water_capacity_litres', groupName, className, device.address, waterCapacityLitres));
+            }
+
+            const waterAvailableLitres = await this.getEpcValue(device.address, device.eoj, 0xE1, false);
+            if (waterAvailableLitres !== null) {
+                metrics.push(makeMetric('water_available_litres', groupName, className, device.address, waterAvailableLitres));
+            }
+
+            const waterUsedLitres = await this.getEpcValue(device.address, device.eoj, 0xF2, true);
+            if (waterUsedLitres !== null) {
+                metrics.push(makeMetric('water_used_litres', groupName, className, device.address, waterUsedLitres));
+            }
+        }
+
+        // ── Home air conditioner class ─────────────────────────────────────
+        if (groupCode === DEVICE_CLASSES.HOME_AIR_CONDITIONER.group && classCode === DEVICE_CLASSES.HOME_AIR_CONDITIONER.class) {
+            const indoorTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xBB, true);
+            if (indoorTemperatureCelsius !== null) {
+                metrics.push(makeMetric('air_temperature_celsius', groupName, className, device.address, indoorTemperatureCelsius, { location: 'indoor' }));
+            }
+
+            const outdoorTemperatureCelsius = await this.getEpcValue(device.address, device.eoj, 0xBE, true);
+            if (outdoorTemperatureCelsius !== null) {
+                metrics.push(makeMetric('air_temperature_celsius', groupName, className, device.address, outdoorTemperatureCelsius, { location: 'outdoor' }));
+            }
+
+            const indoorRelativeHumidityPercent = await this.getEpcValue(device.address, device.eoj, 0xBA, true);
+            if (indoorRelativeHumidityPercent !== null) {
+                metrics.push(makeMetric('air_relative_humidity_percent', groupName, className, device.address, indoorRelativeHumidityPercent, { location: 'indoor' }));
+            }
+        }
+
+        return metrics;
+    }
+
+    // Enqueue a request to ensure only one EPC request is in flight at a time
+    private enqueue<T>(request: () => Promise<T>): Promise<T> {
+        const prev = this.requestQueue;
+        const queued = prev.then(request);
+        this.requestQueue = queued.then(() => {}, () => {}); // Keep chain alive on error
+        return queued;
+    }
+
     getEpcValue(address: string, eoj: number[], epc: number, signed: boolean): Promise<number | null> {
         const label = `[${address}] epc=0x${epc.toString(16)}`;
-        const inner = new Promise<number | null>((resolve, reject) => {
-            this.echonet.getPropertyValue(address, eoj, epc, (err: Error | null, res: EchonetPropertyResponse) => {
-                if (err != null) {
-                    logger.error(`EPC GET error ${label}: ${err}`);
-                    reject(err);
-                    return;
-                }
-                for (const prop of res.message.prop) {
-                    if (prop.epc === epc && prop.buffer !== null) {
-                        resolve(this.convertValue(Buffer.from(prop.buffer), signed));
+        return this.enqueue(() => {
+            let settled = false;
+            const inner = new Promise<number | null>((resolve, reject) => {
+                this.echonet.getPropertyValue(address, eoj, epc, (err: Error | null, res: EchonetPropertyResponse) => {
+                    if (settled) return;
+                    if (err != null) {
+                        settled = true;
+                        logger.error(`EPC GET error ${label}: ${err}`);
+                        reject(err);
                         return;
                     }
-                }
-                logger.debug(`EPC GET ${label}: no matching property in response, skipping`);
-                resolve(null);
+                    for (const prop of res.message.prop) {
+                        if (prop.epc === epc && prop.buffer !== null) {
+                            settled = true;
+                            resolve(this.convertValue(Buffer.from(prop.buffer), signed));
+                            return;
+                        }
+                    }
+                    settled = true;
+                    logger.debug(`EPC GET ${label}: no matching property in response, skipping`);
+                    resolve(null);
+                });
             });
+            return withTimeout(inner, this.requestTimeoutMs, `EPC GET ${label}`);
         });
-        return withTimeout(inner, this.requestTimeoutMs, `EPC GET ${label}`);
     }
 
     setEpcValue(address: string, eoj: number[], epc: number, edt: Buffer): Promise<void> {
@@ -266,52 +338,62 @@ export default class ELProvider {
 
     getEpcList(address: string, eoj: number[], epc: number, signed: boolean): Promise<(number | null)[]> {
         const label = `[${address}] epc=0x${epc.toString(16)}`;
-        const inner = new Promise<(number | null)[]>((resolve, reject) => {
-            this.echonet.getPropertyValue(address, eoj, epc, (err: Error | null, res: EchonetPropertyResponse) => {
-                if (err != null) {
-                    logger.error(`EPC GET LIST error ${label}: ${err}`);
-                    reject(err);
-                    return;
-                }
-                for (const prop of res.message.prop) {
-                    if (prop.epc === epc && prop.buffer !== null) {
-                        const buf = Buffer.from(prop.buffer);
-                        const aryLen = buf[1] - buf[0] + 1;
-                        const valLen = (buf.length - 2) / aryLen;
-
-                        const values: (number | null)[] = [];
-                        for (let i = 2; i <= prop.buffer.length - valLen; i += valLen) {
-                            values.push(this.convertValue(buf.slice(i, i + valLen), signed));
-                        }
-                        resolve(values);
+        return this.enqueue(() => {
+            let settled = false;
+            const inner = new Promise<(number | null)[]>((resolve, reject) => {
+                this.echonet.getPropertyValue(address, eoj, epc, (err: Error | null, res: EchonetPropertyResponse) => {
+                    if (settled) return;
+                    if (err != null) {
+                        settled = true;
+                        logger.error(`EPC GET LIST error ${label}: ${err}`);
+                        reject(err);
                         return;
                     }
-                }
-                logger.debug(`EPC GET LIST ${label}: no matching property in response, skipping`);
-                resolve([]);
+                    for (const prop of res.message.prop) {
+                        if (prop.epc === epc && prop.buffer !== null) {
+                            settled = true;
+                            // EDT array format: [first_index (1B), last_index (1B), values...]
+                            const buf = Buffer.from(prop.buffer);
+                            const aryLen = buf[1] - buf[0] + 1;
+                            const valLen = (buf.length - 2) / aryLen;
+                            if (!Number.isInteger(valLen) || valLen < 1) {
+                                logger.warn(`EPC GET LIST ${label}: malformed array buffer, skipping`);
+                                resolve([]);
+                                return;
+                            }
+                            const values: (number | null)[] = [];
+                            for (let i = 2; i <= buf.length - valLen; i += valLen) {
+                                values.push(this.convertValue(buf.slice(i, i + valLen), signed));
+                            }
+                            resolve(values);
+                            return;
+                        }
+                    }
+                    settled = true;
+                    logger.debug(`EPC GET LIST ${label}: no matching property in response, skipping`);
+                    resolve([]);
+                });
             });
+            return withTimeout(inner, this.requestTimeoutMs, `EPC GET LIST ${label}`);
         });
-        return withTimeout(inner, this.requestTimeoutMs, `EPC GET LIST ${label}`);
     }
 
     convertValue(buffer: Buffer, signed: boolean): number | null {
-        const buf = Buffer.from(buffer);
-
         if (signed) {
-            switch (buf.byteLength) {
-                case 1: return buf.readInt8();
-                case 2: return buf.readInt16BE();
-                case 4: return buf.readInt32BE();
+            switch (buffer.byteLength) {
+                case 1: return buffer.readInt8();
+                case 2: return buffer.readInt16BE();
+                case 4: return buffer.readInt32BE();
             }
         } else {
-            switch (buf.byteLength) {
-                case 1: return buf.readUint8();
-                case 2: return buf.readUint16BE();
-                case 4: return buf.readUint32BE();
+            switch (buffer.byteLength) {
+                case 1: return buffer.readUint8();
+                case 2: return buffer.readUint16BE();
+                case 4: return buffer.readUint32BE();
             }
         }
 
-        logger.warn(`convertValue: unexpected buffer length ${buf.byteLength}, skipping`);
+        logger.warn(`convertValue: unexpected buffer length ${buffer.byteLength}, skipping`);
         return null;
     }
 
@@ -370,8 +452,7 @@ export default class ELProvider {
         });
     }
 
-    showErrorExit(err: Error): void {
-        logger.error('[ERROR] ' + err.toString());
-        process.exit(1);
+    private logError(err: Error): void {
+        logger.error(err.toString());
     }
 }

@@ -2,12 +2,19 @@ import { Registry, Gauge } from 'prom-client';
 import ELProvider from './echonet';
 import logger from './logger';
 
+// ─── Meter configuration ──────────────────────────────────────────────────────
+
+export interface MeterConfig {
+    name?: string;
+    circuits?: Record<string, string>;
+}
+
 // ─── Label type aliases ───────────────────────────────────────────────────────
 
 type BaseLabels = 'address' | 'echonet_group' | 'echonet_class';
 type MeterLabels = BaseLabels | 'meter_name';
-type CircuitLabels = BaseLabels | 'circuit_id' | 'circuit_name';
-type LocationLabels = BaseLabels | 'location';
+type CircuitLabels = BaseLabels | 'meter_name' | 'circuit_id' | 'circuit_name';
+type LocationLabels = BaseLabels | 'meter_name' | 'location';
 
 // ─── Gauge metric names ───────────────────────────────────────────────────────
 
@@ -26,7 +33,6 @@ const gaugeMetricNames = [
     'water_temperature_celsius',
     'air_temperature_celsius',
     'air_relative_humidity_percent',
-    'gas_used_cubic_meters',
 ] as const;
 
 type GaugeMetricName = typeof gaugeMetricNames[number];
@@ -57,13 +63,13 @@ function buildRegistry(): Registry {
     registry.registerMetric(new Gauge<CircuitLabels>({
         name: 'power_circuit_kwh',
         help: 'Cumulative circuit power in kWh',
-        labelNames: ['address', 'echonet_group', 'echonet_class', 'circuit_id', 'circuit_name'],
+        labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name', 'circuit_id', 'circuit_name'],
     }));
 
     registry.registerMetric(new Gauge<CircuitLabels>({
         name: 'power_circuit_watts',
         help: 'Circuit power in watts',
-        labelNames: ['address', 'echonet_group', 'echonet_class', 'circuit_id', 'circuit_name'],
+        labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name', 'circuit_id', 'circuit_name'],
     }));
 
     registry.registerMetric(new Gauge<MeterLabels>({
@@ -108,22 +114,16 @@ function buildRegistry(): Registry {
         labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
     }));
 
-    registry.registerMetric(new Gauge<MeterLabels>({
-        name: 'gas_used_cubic_meters',
-        help: 'Total gas used in cubic metres',
-        labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name'],
-    }));
-
     registry.registerMetric(new Gauge<LocationLabels>({
         name: 'air_temperature_celsius',
         help: 'Air temperature in degrees Celsius',
-        labelNames: ['address', 'echonet_group', 'echonet_class', 'location'],
+        labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name', 'location'],
     }));
 
     registry.registerMetric(new Gauge<LocationLabels>({
         name: 'air_relative_humidity_percent',
         help: 'Air relative humidity in percent',
-        labelNames: ['address', 'echonet_group', 'echonet_class', 'location'],
+        labelNames: ['address', 'echonet_group', 'echonet_class', 'meter_name', 'location'],
     }));
 
     return registry;
@@ -152,12 +152,17 @@ export default class MetricsProvider {
     );
 
     static echonet: ELProvider;
+    private static meters: Record<string, MeterConfig> = {};
 
-    static init(netif: string, discoveryIntervalSecs: number, discoveryDurationSecs: number, epcTimeoutSecs?: number): void {
+    static init(netif: string, discoveryIntervalSecs: number, discoveryDurationSecs: number, epcTimeoutSecs?: number, meters?: Record<string, MeterConfig>): void {
+        MetricsProvider.meters = meters ?? {};
         MetricsProvider.echonet = new ELProvider(netif, discoveryIntervalSecs, discoveryDurationSecs, epcTimeoutSecs);
     }
 
-    public static getMetrics = async (): Promise<string> => {
+    static async getMetrics(): Promise<string> {
+        if (!MetricsProvider.echonet) {
+            throw new Error('Metrics not initialized. Call Metrics.init() before getMetrics().');
+        }
         const echonetMetrics = await MetricsProvider.echonet.getMetrics();
 
         for (const metric of echonetMetrics) {
@@ -167,14 +172,18 @@ export default class MetricsProvider {
                 continue;
             }
 
+            const meterConfig = MetricsProvider.meters[metric.address];
+            const meterName = meterConfig?.name ?? '';
             const baseLabels = {
                 address: metric.address,
                 echonet_group: metric.group,
                 echonet_class: metric.class,
+                meter_name: meterName,
             };
 
             if (metric.circuit !== undefined) {
-                gauge.set({ ...baseLabels, circuit_id: metric.circuit }, metric.value);
+                const circuitName = meterConfig?.circuits?.[String(metric.circuit)] ?? '';
+                gauge.set({ ...baseLabels, circuit_id: metric.circuit, circuit_name: circuitName }, metric.value);
             } else if (metric.location !== undefined) {
                 gauge.set({ ...baseLabels, location: metric.location }, metric.value);
             } else {
@@ -183,5 +192,5 @@ export default class MetricsProvider {
         }
 
         return MetricsProvider.registry.metrics();
-    };
+    }
 }

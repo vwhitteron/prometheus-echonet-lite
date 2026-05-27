@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import express, { Express, Request, Response } from 'express';
-import Metrics from './metrics';
+import Metrics, { MeterConfig } from './metrics';
 import { resolveNetif } from './netif';
 import logger from './logger';
 
@@ -16,6 +16,7 @@ interface Config {
         discoveryDurationSecs: number;
         epcTimeoutSecs?: number;
     };
+    meters?: Record<string, MeterConfig>;
 }
 
 const configPath = path.resolve(__dirname, '..', 'config.json');
@@ -28,7 +29,7 @@ const port: number = config.server.port != null
 const address: string = config.server.address ?? '127.0.0.1';
 
 const netif = resolveNetif(config.echonet.netif);
-Metrics.init(netif, config.echonet.discoveryIntervalSecs, config.echonet.discoveryDurationSecs, config.echonet.epcTimeoutSecs);
+Metrics.init(netif, config.echonet.discoveryIntervalSecs, config.echonet.discoveryDurationSecs, config.echonet.epcTimeoutSecs, config.meters);
 
 const app: Express = express();
 
@@ -48,10 +49,10 @@ const server = app.listen(port, address, () => {
 
 async function shutdown(signal: string): Promise<void> {
     logger.info(`Received ${signal}, shutting down gracefully`);
-    server.close();
+    await new Promise<void>(resolve => { server.close(() => resolve()); });
     await Metrics.echonet.shutdown();
     process.exit(0);
 }
 
-process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
-process.on('SIGINT', () => { void shutdown('SIGINT'); });
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch(e => logger.error(String(e))); });
+process.on('SIGINT', () => { shutdown('SIGINT').catch(e => logger.error(String(e))); });

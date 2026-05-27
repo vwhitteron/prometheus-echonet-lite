@@ -10,14 +10,29 @@
         "epcTimeoutSecs": 5
     },
     "meters": {
-        "10.255.1.61": {
-            "name": "smart-cosmo",
+        "10.255.1.59": {
+            "name": "mcb-garage",
+            "circuits": {
+                "1": "Network rack",
+                "2": "Outlets north",
+                "3": "Lighting",
+                "4": "Outlets center",
+                "5": "Outlets south",
+                "6": "Lathe",
+                "7": "EV charger south",
+                "8": "EV charger north",
+                "9": "Aircon",
+                "10": "Unused"
+            }
+        },
+        "10.255.1.49": {
+            "name": "mcb-house",
             "circuits": {
                 "1": "Washing machine",
                 "2": "Network rack",
                 "3": "Wash room",
                 "4": "EV charger",
-                "5": "Study",
+                "5": "Study and lounge",
                 "6": "2F Bedroom east",
                 "7": "Oven",
                 "8": "EcoCute",
@@ -31,19 +46,19 @@
                 "16": "Sub-panel",
                 "17": "Dishwasher",
                 "18": "Kitchen",
-                "19": "unused",
+                "19": "Garage",
                 "20": "Dining room",
-                "21": "unused",
-                "22": "unused",
-                "23": "unused",
-                "24": "unused"
+                "21": "Unused",
+                "22": "Unused",
+                "23": "Unused",
+                "24": "Unused"
             }
         },
-        "10.255.1.62": {
+        "10.255.1.50": {
             "name": "solar-pdu",
             "circuits": {
-                "1": "unused",
-                "2": "unused"
+                "1": "",
+                "2": ""
             }
         }
     }
